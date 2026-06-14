@@ -397,8 +397,16 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
         }
         else
         {
-            player.Disconnect((NetworkDisconnectionReason)Config.kickReason);
-            LogMessage(name, steamid, reason);
+            var playerSteamId = player.SteamID;
+            Server.NextFrame(() =>
+            {
+                var deferredPlayer = Utilities.GetPlayers().FirstOrDefault(p => IsHumanPlayer(p) && p.SteamID == playerSteamId);
+                if (deferredPlayer == null || !deferredPlayer.IsValid)
+                    return;
+
+                deferredPlayer.Disconnect((NetworkDisconnectionReason)Config.kickReason);
+                LogMessage(name, steamid, reason);
+            });
         }
     }
 
@@ -688,7 +696,7 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
         return player.IsValid &&
             !player.IsHLTV &&
             !player.IsBot &&
-            player.Connected == PlayerConnectedState.PlayerConnected &&
+            player.Connected == PlayerConnectedState.Connected &&
             player.SteamID.ToString().Length == 17;
     }
 
