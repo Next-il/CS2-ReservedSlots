@@ -30,6 +30,8 @@ public class ReservedSlotsConfig : BasePluginConfig
     [JsonPropertyName("Kick Players In Spectate")] public bool kickPlayersInSpectate { get; set; } = true;
     [JsonPropertyName("Log Kicked Players")] public bool logKickedPlayers { get; set; } = true;
     [JsonPropertyName("Display Kicked Players Message")] public int displayKickedPlayers { get; set; } = 2;
+	[JsonPropertyName("Auto Update sv_visiblemaxplayers")] public bool autoUpdateVisibleMaxPlayers { get; set; } = true;
+
 }
 
 public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
@@ -121,6 +123,22 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
         }
     }
 
+	public void UpdateMaxPlayers()
+	{
+		// Update sv_visiblemaxplayers to match the max players minus reserved slots
+        var visibleMaxPlayers = ConVar.Find("sv_visiblemaxplayers");
+        if (visibleMaxPlayers != null)
+        {
+            visibleMaxPlayers.SetValue(Server.MaxPlayers - Config.reservedSlots);
+            RefreshVisibleMaxPlayers();
+            Logger.LogInformation("[Reserved Slots] sv_visiblemaxplayers has been updated to {Value} based on the reserved slots configuration.", GetVisibleMaxPlayers());
+        }
+        else
+        {
+            Logger.LogWarning("[Reserved Slots] Could not find convar 'sv_visiblemaxplayers' to update its value based on the reserved slots configuration.");
+        }
+	}
+
     public override void Load(bool hotReload)
     {
         RegisterListener<Listeners.OnMapStart>(mapName =>
@@ -132,6 +150,11 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
             AddTimer(3.0f, () =>
             {
                 RefreshVisibleMaxPlayers();
+
+				if (Config.autoUpdateVisibleMaxPlayers)
+				{
+					UpdateMaxPlayers();
+				}
             }, TimerFlags.STOP_ON_MAPCHANGE);
         });
 
