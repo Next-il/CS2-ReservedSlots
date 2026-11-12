@@ -3,6 +3,7 @@ using CounterStrikeSharp.API.Core;
 using CounterStrikeSharp.API.Modules.Utils;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Admin;
+using CounterStrikeSharp.API.Modules.Entities;
 using System.Text.Json.Serialization;
 using CounterStrikeSharp.API.Modules.Timers;
 using Microsoft.Extensions.Logging;
@@ -40,7 +41,11 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
 
     public override string ModuleName => "Reserved Slots";
     public override string ModuleAuthor => "Nocky (SourceFactory.eu)";
-    public override string ModuleVersion => "1.2.0";
+    public override string ModuleVersion => "1.2.1";
+
+    // Flags are only readable once Steam has validated a player (AdminManager keys on AuthorizedSteamID).
+    // A "server is full" kick for a player Steam has not validated yet waits up to this long, then decides again.
+    private const int AuthGraceSeconds = 15;
 
     public enum KickType
     {
@@ -155,8 +160,13 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
 				{
 					UpdateMaxPlayers();
 				}
+
+                // ResetTransientPlayerState above dropped everyone's immunity; players already validated by Steam get it back here
+                RebuildReservedPlayersCache();
             }, TimerFlags.STOP_ON_MAPCHANGE);
         });
+
+        RegisterListener<Listeners.OnClientAuthorized>(OnClientAuthorized);
 
         RefreshVisibleMaxPlayers();
 
@@ -207,11 +217,44 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
 
             ClearPendingAdmissionState(player.SteamID);
 
-            int maxPlayers = Server.MaxPlayers;
             var playerReservedType = GetPlayersReservedType(player);
             UpdateReservationTracking(player, playerReservedType);
 
-            var connectedHumanPlayers = GetConnectedHumanPlayers();
+            HandleAdmission(player, playerReservedType, GetConnectedHumanPlayers());
+        }
+        return HookResult.Continue;
+    }
+
+    /// <summary>
+    /// Steam validated a player. Until now their flags were unreadable, so a connect-time decision may have
+    /// treated an admin/VIP as a regular player: give them their immunity, and if a "server is full" kick is
+    /// waiting for them, cancel it and admit them the way a reserved join would have been.
+    /// </summary>
+    private void OnClientAuthorized(int playerSlot, SteamID steamId)
+    {
+        var player = Utilities.GetPlayerFromSlot(playerSlot);
+        // Still connecting: their connect-full event comes later and sees the flags then
+        if (player == null || !IsHumanPlayer(player))
+            return;
+
+        var reservedType = GetReservedType(AdminManager.GetPlayerAdminData(steamId));
+        UpdateReservationTracking(player, reservedType);
+
+        if (reservedType == ReservedType.None)
+            return;
+
+        if (!waitingForKick.TryGetValue(player.SteamID, out var pendingKick) || pendingKick.Reason != KickReason.ServerIsFull)
+            return;
+
+        ClearPendingKick(player.SteamID, pendingKick);
+        Logger.LogInformation("[Reserved Slots] {Name} ({SteamID}) was validated by Steam after connecting and holds a reservation - the server-full kick is cancelled.", player.PlayerName, player.SteamID);
+        HandleAdmission(player, reservedType, GetConnectedHumanPlayers());
+    }
+
+    private void HandleAdmission(CCSPlayerController player, ReservedType playerReservedType, List<CCSPlayerController> connectedHumanPlayers)
+    {
+        {
+            int maxPlayers = Server.MaxPlayers;
             int totalPlayers = GetPlayersCount(connectedHumanPlayers);
 
             switch (Config.reservedSlotsMethod)
@@ -257,12 +300,15 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
                     break;
             }
         }
-        return HookResult.Continue;
     }
 
     public ReservedType GetPlayersReservedType(CCSPlayerController player)
     {
-        var adminData = AdminManager.GetPlayerAdminData(player);
+        return GetReservedType(AdminManager.GetPlayerAdminData(player));
+    }
+
+    private ReservedType GetReservedType(AdminData? adminData)
+    {
         if (adminData == null)
             return ReservedType.None;
 
@@ -393,44 +439,104 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
 
         var name = player.PlayerName;
         var steamid = player.SteamID.ToString();
+        var playerSteamId = player.SteamID;
         int delay = GetKickDelay(reason);
 
-        if (delay >= 1)
+        // Steam has not validated this player yet, so their flags cannot be read and "no reservation" is only a guess.
+        // Never turn them away on that guess: go through the timer, which waits for Steam and decides again.
+        bool awaitingSteam = reason == KickReason.ServerIsFull && player.AuthorizedSteamID == null;
+
+        if (delay >= 1 || awaitingSteam)
         {
-            var playerSteamId = player.SteamID;
             if (!TryStartPendingKick(playerSteamId, reason, out var pendingKick))
                 return;
 
-            ShowKickHint(player, reason, delay);
+            if (delay >= 1)
+                ShowKickHint(player, reason, delay);
 
-            AddTimer(delay, () =>
-            {
-                if (!IsCurrentPendingKick(playerSteamId, pendingKick))
-                    return;
-
-                var delayedPlayer = Utilities.GetPlayers().FirstOrDefault(p => IsHumanPlayer(p) && p.SteamID == playerSteamId);
-                if (delayedPlayer != null && delayedPlayer.IsValid)
-                {
-                    delayedPlayer.Disconnect((NetworkDisconnectionReason)Config.kickReason);
-                    LogMessage(name, steamid, reason);
-                }
-
-                ClearPendingKick(playerSteamId, pendingKick);
-            }, TimerFlags.STOP_ON_MAPCHANGE);
+            ScheduleKick(playerSteamId, name, steamid, reason, pendingKick, Math.Max(delay, 1), DateTime.UtcNow.AddSeconds(AuthGraceSeconds));
         }
         else
         {
-            var playerSteamId = player.SteamID;
             Server.NextFrame(() =>
             {
-                var deferredPlayer = Utilities.GetPlayers().FirstOrDefault(p => IsHumanPlayer(p) && p.SteamID == playerSteamId);
-                if (deferredPlayer == null || !deferredPlayer.IsValid)
+                var deferredPlayer = FindHumanPlayer(playerSteamId);
+                if (deferredPlayer == null || !ShouldStillKick(deferredPlayer, reason))
                     return;
 
                 deferredPlayer.Disconnect((NetworkDisconnectionReason)Config.kickReason);
                 LogMessage(name, steamid, reason);
             });
         }
+    }
+
+    private void ScheduleKick(ulong steamId, string name, string steamIdText, KickReason reason, PendingKickState pendingKick, float after, DateTime steamDeadline)
+    {
+        AddTimer(after, () =>
+        {
+            if (!IsCurrentPendingKick(steamId, pendingKick))
+                return;
+
+            var target = FindHumanPlayer(steamId);
+            if (target == null)
+            {
+                ClearPendingKick(steamId, pendingKick);
+                return;
+            }
+
+            // Still not validated by Steam: give it a moment longer, then decide with whatever is known
+            if (reason == KickReason.ServerIsFull && target.AuthorizedSteamID == null && DateTime.UtcNow < steamDeadline)
+            {
+                ScheduleKick(steamId, name, steamIdText, reason, pendingKick, 1f, steamDeadline);
+                return;
+            }
+
+            if (!ShouldStillKick(target, reason))
+            {
+                ClearPendingKick(steamId, pendingKick);
+
+                if (reason == KickReason.ServerIsFull)
+                {
+                    // Validated late and holds a reservation: admit them the way a reserved join would have been
+                    var reservedType = GetPlayersReservedType(target);
+                    UpdateReservationTracking(target, reservedType);
+                    HandleAdmission(target, reservedType, GetConnectedHumanPlayers());
+                }
+                return;
+            }
+
+            target.Disconnect((NetworkDisconnectionReason)Config.kickReason);
+            LogMessage(name, steamIdText, reason);
+            ClearPendingKick(steamId, pendingKick);
+        }, TimerFlags.STOP_ON_MAPCHANGE);
+    }
+
+    /// <summary>
+    /// The last check before a kick goes out. A "server is full" kick is dropped when the player turns out to hold a
+    /// reservation; a kick that makes room for a reserved player is dropped when its victim has become immune since
+    /// (an admin Steam validated after they were picked).
+    /// </summary>
+    private bool ShouldStillKick(CCSPlayerController player, KickReason reason)
+    {
+        if (reason == KickReason.ServerIsFull)
+        {
+            if (GetPlayersReservedType(player) == ReservedType.None)
+                return true;
+
+            Logger.LogInformation("[Reserved Slots] {Name} ({SteamID}) holds a reservation after all - not kicking them as server full.", player.PlayerName, player.SteamID);
+            return false;
+        }
+
+        if (!immunePlayers.Contains(player.SteamID))
+            return true;
+
+        Logger.LogInformation("[Reserved Slots] {Name} ({SteamID}) became immune before the kick - skipping it.", player.PlayerName, player.SteamID);
+        return false;
+    }
+
+    private static CCSPlayerController? FindHumanPlayer(ulong steamId)
+    {
+        return Utilities.GetPlayers().FirstOrDefault(p => IsHumanPlayer(p) && p.SteamID == steamId);
     }
 
     private int GetKickDelay(KickReason reason)
