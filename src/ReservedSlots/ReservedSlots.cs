@@ -464,8 +464,9 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
                 if (deferredPlayer == null || !ShouldStillKick(deferredPlayer, reason))
                     return;
 
+                var players = GetPlayersCount();
                 deferredPlayer.Disconnect((NetworkDisconnectionReason)Config.kickReason);
-                LogMessage(name, steamid, reason);
+                LogMessage(name, steamid, reason, players);
             });
         }
     }
@@ -505,8 +506,9 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
                 return;
             }
 
+            var players = GetPlayersCount();
             target.Disconnect((NetworkDisconnectionReason)Config.kickReason);
-            LogMessage(name, steamIdText, reason);
+            LogMessage(name, steamIdText, reason, players);
             ClearPendingKick(steamId, pendingKick);
         }, TimerFlags.STOP_ON_MAPCHANGE);
     }
@@ -520,10 +522,19 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
     {
         if (reason == KickReason.ServerIsFull)
         {
-            if (GetPlayersReservedType(player) == ReservedType.None)
+            if (GetPlayersReservedType(player) != ReservedType.None)
+            {
+                Logger.LogInformation("[Reserved Slots] {Name} ({SteamID}) holds a reservation after all - not kicking them as server full.", player.PlayerName, player.SteamID);
+                return false;
+            }
+
+            // "Full" was decided when they joined; the kick goes out 5s later (up to 15s while Steam validates them).
+            // Someone who left in that window freed the slot, and kicking anyway threw players off a 9/10 server.
+            var connectedHumanPlayers = GetConnectedHumanPlayers();
+            if (IsOverPublicSlots(connectedHumanPlayers))
                 return true;
 
-            Logger.LogInformation("[Reserved Slots] {Name} ({SteamID}) holds a reservation after all - not kicking them as server full.", player.PlayerName, player.SteamID);
+            Logger.LogInformation("[Reserved Slots] {Name} ({SteamID}) - a slot opened before the kick ({Humans} players), letting them stay.", player.PlayerName, player.SteamID, connectedHumanPlayers.Count);
             return false;
         }
 
@@ -532,6 +543,29 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
 
         Logger.LogInformation("[Reserved Slots] {Name} ({SteamID}) became immune before the kick - skipping it.", player.PlayerName, player.SteamID);
         return false;
+    }
+
+    /// <summary>
+    /// Whether the connected humans (the joining player included) are still past what a regular player may fill -
+    /// the same test HandleAdmission applies per method.
+    /// </summary>
+    private bool IsOverPublicSlots(List<CCSPlayerController> connectedHumanPlayers)
+    {
+        int maxPlayers = Server.MaxPlayers;
+        int totalPlayers = GetPlayersCount(connectedHumanPlayers);
+
+        switch (Config.reservedSlotsMethod)
+        {
+            case 1:
+                return totalPlayers > maxPlayers - Config.reservedSlots;
+            case 2:
+                return totalPlayers - GetPlayersCountWithReservationFlag(connectedHumanPlayers) > maxPlayers - Config.reservedSlots;
+            case 3:
+                int joinThreshold = Math.Max(0, Config.openSlot ? GetPublicSlots(maxPlayers) - 1 : GetPublicSlots(maxPlayers));
+                return totalPlayers > joinThreshold;
+            default:
+                return totalPlayers >= maxPlayers;
+        }
     }
 
     private static CCSPlayerController? FindHumanPlayer(ulong steamId)
@@ -549,13 +583,14 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
         };
     }
 
-    public void LogMessage(string name, string steamid, KickReason reason)
+    public void LogMessage(string name, string steamid, KickReason reason, int? players = null)
     {
         switch (reason)
         {
             case KickReason.ServerIsFull:
+                // The count, taken before the kick and including the kicked player, is what a "kicked from a 9/10 server" report gets checked against
                 if (Config.logKickedPlayers)
-                    Logger.LogInformation($"Player {name} ({steamid}) was kicked, because the server is full.");
+                    Logger.LogInformation($"Player {name} ({steamid}) was kicked, because the server is full ({players ?? GetPlayersCount()}/{GetPublicSlots(Server.MaxPlayers)} players).");
 
                 if (Config.displayKickedPlayers == 1)
                     Server.PrintToChatAll(Localizer["Chat.PlayerWasKicked.ServerIsFull", name]);
