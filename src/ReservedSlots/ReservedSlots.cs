@@ -863,6 +863,10 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
         if (pawn == null || !pawn.IsValid)
             return;
 
+        // Taken while the player is valid: the timers below outlive a kicked player, and a gone
+        // controller's SteamID can no longer be read.
+        var steamId = player.SteamID;
+
         var kickMessage = reason == KickReason.ServerIsFull
             ? Localizer["Hud.ServerIsFull"]
             : Localizer["Hud.ReservedPlayerJoined"];
@@ -873,21 +877,21 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
         {
             if (!player.IsValid)
             {
-                SetGameInstructorState(player, enabled: false);
+                SetGameInstructorState(player, enabled: false, steamId);
                 return;
             }
 
             var currentPawn = player.PlayerPawn?.Value;
             if (currentPawn == null || !currentPawn.IsValid)
             {
-                SetGameInstructorState(player, enabled: false);
+                SetGameInstructorState(player, enabled: false, steamId);
                 return;
             }
 
             var hint = Utilities.CreateEntityByName<CEnvInstructorHint>("env_instructor_hint");
             if (hint == null)
             {
-                SetGameInstructorState(player, enabled: false);
+                SetGameInstructorState(player, enabled: false, steamId);
                 return;
             }
 
@@ -908,7 +912,7 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
 
             AddTimer(delay + 0.25f, () =>
             {
-                SetGameInstructorState(player, enabled: false);
+                SetGameInstructorState(player, enabled: false, steamId);
             }, TimerFlags.STOP_ON_MAPCHANGE);
         }, TimerFlags.STOP_ON_MAPCHANGE);
     }
@@ -931,15 +935,19 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
             Server.ExecuteCommand("sv_gameinstructor_disable true");
     }
 
-    private void SetGameInstructorState(CCSPlayerController? player, bool enabled)
+    /// <param name="steamId">The player's id, read while they were still valid. Needed to release a player who
+    /// already left: reading SteamID off a gone controller throws "Schema target points to null" - the kick
+    /// hint's end timer hit that for every player it kicked.</param>
+    private void SetGameInstructorState(CCSPlayerController? player, bool enabled, ulong steamId = 0)
     {
         if (player == null)
             return;
 
         if (!player.IsValid)
         {
-            if (!enabled)
-                _playersWithInstructorEnabled.Remove(player.SteamID);
+            // OnPlayerDisconnect has normally released them already; this covers a disconnect it missed.
+            if (!enabled && steamId != 0 && _playersWithInstructorEnabled.Remove(steamId) && _playersWithInstructorEnabled.Count == 0)
+                Server.ExecuteCommand("sv_gameinstructor_disable true");
             return;
         }
 
