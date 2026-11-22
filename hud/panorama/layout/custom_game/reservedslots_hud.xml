@@ -31,9 +31,8 @@
 		CLASSES THE SERVER TOGGLES
 		  rs_card   show hidden
 		  rs_n      pop-a pop-b                     (ping-pong, once a second in the last 3)
-		  rs_bar    at-0..at-20                     where the bar starts, in 5% steps (at-20 = full)
-		            dur-1..dur-60, dur-65..dur-180  how long it drains for (5s steps above 60)
-		            run                             drain to 0, one linear clip transition
+		  rs_bar    s0..s50                         where the bar is, 2% a step (s50 = full); one fixed
+		                                            0.3s glide, a new step every 0.2s
 	-->
 	<Panel class="hud-screen" hittest="false">
 		<Panel id="ReservedSlotsRoot" class="rs-root" hittest="false">
