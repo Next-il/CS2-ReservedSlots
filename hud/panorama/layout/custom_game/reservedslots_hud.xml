@@ -1,0 +1,61 @@
+<root>
+	<styles>
+		<include src="s2r://panorama/styles/custom_game/hud_shared.vcss_c" />
+		<include src="s2r://panorama/styles/custom_game/reservedslots_hud.vcss_c" />
+	</styles>
+
+	<!--
+		ReservedSlots HUD - one private red card for the player about to be kicked, lower middle
+		(top 640), under the crosshair. The same card as AFKManager's countdown (afk_hud), in red.
+
+		  A reserved player joined   "Reserved slot / A VIP joined a full server / You are the one
+		                             leaving. Thanks for playing.", a big countdown and a 2px bar
+		                             draining over it, for the plugin's kick delay
+		  The server is full         the same card for a joining player turned away
+		                             (both were env_instructor_hint captions before)
+
+		The number pops once a second in the last 3. The kick itself ends the card: the player is gone.
+
+		NOT INTERACTIVE. hittest false everywhere; the plugin opens it with CaptureInput = false.
+
+		CONTRACT (src/ReservedSlots/Hud/KickHud.cs must match)
+		  RootPanelId  = "ReservedSlotsRoot"   RevealClass = "show"   RowCount = 0
+		  CaptureInput = false                 HideHud = None         SharedText = false
+
+		The root is full-screen and carries nothing visible itself; it is opened once per player and
+		stays open. The card has its own "show", and "hidden" (collapse) while it is not in use.
+
+		DIALOG VARIABLES
+		  rs_eyebrow rs_title rs_sub rs_n
+
+		CLASSES THE SERVER TOGGLES
+		  rs_card   show hidden
+		  rs_n      pop-a pop-b                     (ping-pong, once a second in the last 3)
+		  rs_bar    at-0..at-20                     where the bar starts, in 5% steps (at-20 = full)
+		            dur-1..dur-60, dur-65..dur-180  how long it drains for (5s steps above 60)
+		            run                             drain to 0, one linear clip transition
+	-->
+	<Panel class="hud-screen" hittest="false">
+		<Panel id="ReservedSlotsRoot" class="rs-root" hittest="false">
+
+			<Panel id="rs_card" class="rs hidden" hittest="false">
+				<Panel class="rs-row" hittest="false">
+					<Panel class="rs-icon" hittest="false" />
+					<Panel class="rs-main" hittest="false">
+						<Label class="rs-eyebrow" hittest="false" text="{s:rs_eyebrow}" />
+						<Label class="rs-title" hittest="false" text="{s:rs_title}" />
+						<Label class="rs-sub" hittest="false" text="{s:rs_sub}" />
+					</Panel>
+					<Panel class="rs-num" hittest="false">
+						<Label id="rs_n" class="rs-n" hittest="false" text="{s:rs_n}" />
+						<Label class="rs-s" hittest="false" text="s" />
+					</Panel>
+				</Panel>
+				<Panel class="rs-track" hittest="false">
+					<Panel id="rs_bar" class="rs-bar" hittest="false" />
+				</Panel>
+			</Panel>
+
+		</Panel>
+	</Panel>
+</root>

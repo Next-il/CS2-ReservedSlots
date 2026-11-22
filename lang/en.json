@@ -2,5 +2,15 @@
     "Hud.ServerIsFull": "You're about to be kicked, server is full!",
     "Hud.ReservedPlayerJoined": "You will be kicked, because a \n player with a reserved slot joined!",
     "Chat.PlayerWasKicked.ServerIsFull": "Player {darkred}{0}{default} was kicked due to reserved slot.",
-    "Chat.PlayerWasKicked.ReservedPlayerJoined": "Player {darkred}{0}{default} was kicked due player with a reservation slot joined."
+    "Chat.PlayerWasKicked.ReservedPlayerJoined": "Player {darkred}{0}{default} was kicked due player with a reservation slot joined.",
+    "Card.ReservedPlayerJoined.Eyebrow": "Reserved slot",
+    "Card.ReservedPlayerJoined.Title": "A VIP joined a full server",
+    "Card.ReservedPlayerJoined.TitleAdmin": "An admin joined a full server",
+    "Card.ReservedPlayerJoined.Sub": "You are the one leaving. Thanks for playing.",
+    "Card.ServerIsFull.Eyebrow": "Server full",
+    "Card.ServerIsFull.Title": "The server is full",
+    "Card.ServerIsFull.Sub": "The free slots are reserved. Try again later.",
+    "Toast.PlayerWasKicked.Title": "{0} was kicked",
+    "Toast.PlayerWasKicked.ReservedPlayerJoined": "A reserved slot was needed",
+    "Toast.PlayerWasKicked.ServerIsFull": "The server is full"
 }

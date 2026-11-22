@@ -32,10 +32,12 @@ public class ReservedSlotsConfig : BasePluginConfig
     [JsonPropertyName("Log Kicked Players")] public bool logKickedPlayers { get; set; } = true;
     [JsonPropertyName("Display Kicked Players Message")] public int displayKickedPlayers { get; set; } = 2;
 	[JsonPropertyName("Auto Update sv_visiblemaxplayers")] public bool autoUpdateVisibleMaxPlayers { get; set; } = true;
+    // Optional: a config without it gets the defaults (ReservedSlots.Hud.cs). Never written back on load
+    [JsonPropertyName("Hud")] public ReservedSlotsHudConfig Hud { get; set; } = new();
 
 }
 
-public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
+public partial class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
 {
     private readonly record struct PendingKickState(KickReason Reason, long Token);
 
@@ -172,6 +174,8 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
 
         if (hotReload)
             RebuildReservedPlayersCache();
+
+        HudLoad();
     }
 
     [GameEventHandler]
@@ -201,6 +205,7 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
         {
             ClearTrackedPlayerState(player.SteamID);
             SetGameInstructorState(player, enabled: false);
+            HudDisconnect(player);
         }
 
         return HookResult.Continue;
@@ -434,6 +439,12 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
 
     public void PerformKick(CCSPlayerController? player, KickReason reason)
     {
+        PerformKick(player, reason, ReservedType.None);
+    }
+
+    /// <param name="joiner">For a ReservedPlayerJoined kick, who the room is made for. Only the kick card's title uses it.</param>
+    private void PerformKick(CCSPlayerController? player, KickReason reason, ReservedType joiner)
+    {
         if (player == null || !player.IsValid)
             return;
 
@@ -452,7 +463,7 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
                 return;
 
             if (delay >= 1)
-                ShowKickHint(player, reason, delay);
+                ShowKickWarning(player, reason, delay, pendingKick, joiner);
 
             ScheduleKick(playerSteamId, name, steamid, reason, pendingKick, Math.Max(delay, 1), DateTime.UtcNow.AddSeconds(AuthGraceSeconds));
         }
@@ -592,31 +603,39 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
                 if (Config.logKickedPlayers)
                     Logger.LogInformation($"Player {name} ({steamid}) was kicked, because the server is full ({players ?? GetPlayersCount()}/{GetPublicSlots(Server.MaxPlayers)} players).");
 
-                if (Config.displayKickedPlayers == 1)
-                    Server.PrintToChatAll(Localizer["Chat.PlayerWasKicked.ServerIsFull", name]);
-                else if (Config.displayKickedPlayers == 2)
-                {
-                    foreach (var admin in Utilities.GetPlayers().Where(p => AdminManager.PlayerHasPermissions(p, "@css/generic")))
-                    {
-                        admin.PrintToChat(Localizer["Chat.PlayerWasKicked.ServerIsFull", name]);
-                    }
-                }
+                AnnounceKick(name, steamid, reason, Localizer["Chat.PlayerWasKicked.ServerIsFull", name]);
                 break;
 
             case KickReason.ReservedPlayerJoined:
                 if (Config.logKickedPlayers)
                     Logger.LogInformation($"Player {name} ({steamid}) was kicked, because player with a reservation slot joined.");
 
-                if (Config.displayKickedPlayers == 1)
-                    Server.PrintToChatAll(Localizer["Chat.PlayerWasKicked.ReservedPlayerJoined", name]);
-                else if (Config.displayKickedPlayers == 2)
-                {
-                    foreach (var admin in Utilities.GetPlayers().Where(p => AdminManager.PlayerHasPermissions(p, "@css/generic")))
-                    {
-                        admin.PrintToChat(Localizer["Chat.PlayerWasKicked.ReservedPlayerJoined", name]);
-                    }
-                }
+                AnnounceKick(name, steamid, reason, Localizer["Chat.PlayerWasKicked.ReservedPlayerJoined", name]);
                 break;
+        }
+    }
+
+    /// <summary>
+    /// "Display Kicked Players Message": 1 tells everyone, 2 tells admins (@css/generic), 0 nobody. A toast
+    /// when the HUD can send one (ReservedSlots.Hud.cs), otherwise the chat line as before.
+    /// </summary>
+    private void AnnounceKick(string name, string steamid, KickReason reason, string chatLine)
+    {
+        if (Config.displayKickedPlayers == 1)
+        {
+            if (!HudKickToast(name, steamid, reason, chatLine, Utilities.GetPlayers()))
+                Server.PrintToChatAll(chatLine);
+        }
+        else if (Config.displayKickedPlayers == 2)
+        {
+            var admins = Utilities.GetPlayers().Where(p => AdminManager.PlayerHasPermissions(p, "@css/generic")).ToList();
+            if (HudKickToast(name, steamid, reason, chatLine, admins))
+                return;
+
+            foreach (var admin in admins)
+            {
+                admin.PrintToChat(chatLine);
+            }
         }
     }
 
@@ -657,7 +676,7 @@ public class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConfig>
         }
 
         RecordReservedKickCooldown(player, reservedType);
-        PerformKick(kickedPlayer, KickReason.ReservedPlayerJoined);
+        PerformKick(kickedPlayer, KickReason.ReservedPlayerJoined, reservedType);
         return true;
     }
 

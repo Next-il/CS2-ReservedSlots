@@ -1,0 +1,279 @@
+/*
+    reservedslots_hud - the reserved-slot kick card. Include hud_shared.vcss_c first.
+
+    Ported from the approved preview (previews/more, tab "AFK and kicks", case "A VIP joins a full
+    server": .al with st-kick). It is AFKManager's AFK card (afk_hud.css) in red, with CS2's own
+    account_locked icon. Sizes are 1080p pixels, the same numbers as the preview.
+
+    One card, private to the player about to be kicked, lower middle under the crosshair. It slides
+    up into place with a fade and a blur, and leaves the same way when "show" comes off. Red the whole
+    time: in the preview the last 3 seconds only swap to the AFK card's red "last" state, so here the
+    number pops in those seconds and the lock icon stays.
+
+    THE BAR is one linear clip transition, not a stepped ladder. The plugin picks where it starts
+    (at-N, in 5% steps) with no duration on, so it snaps there; a moment later it adds dur-N and "run"
+    together and the client drains it to 0 on its own. Clearing dur-N before "run" makes the reset
+    snap instead of running backwards - the same rule ToastService follows. clip survives the
+    countdown label being rewritten every second; width would not (runtime-behaviour.md).
+
+    UNVERIFIED IN GAME, each with a harmless failure:
+      - blur in transition-property: if blur does not animate, the card is simply sharp at once.
+      - @keyframes on the number (the last-3-seconds pop): without it the number just counts.
+    All icons are CS2's own (icons/ui/*), tinted with wash-color. Nothing new ships in the addon.
+*/
+
+/* ------------------------------------------------------------------ root */
+
+/* Opened once per player and left open; the card carries its own "show". */
+.rs-root {
+    width: 100%;
+    height: 100%;
+    visibility: collapse;
+}
+.rs-root.show { visibility: visible; }
+
+/* ------------------------------------------------------------------ the card */
+
+.rs {
+    horizontal-align: center;
+    vertical-align: top;
+    margin-top: 640px;
+    width: 352px;
+    border-top: 2px solid #e8543f;
+    world-blur: gaussian(8.0);
+    background-color: gradient(linear, 0% 0%, 0% 100%, from(#12171ee2), to(#0b0f14ec));
+
+    opacity: 0;
+    blur: gaussian(7.0);
+    transform: translateY(32px);
+    transition-property: opacity, transform, blur;
+    transition-duration: 0.3s, 0.34s, 0.3s;
+    transition-timing-function: ease-out, cubic-bezier( 0.2, 0.8, 0.25, 1.0 ), ease-out;
+}
+/* Entering is quicker than leaving: the transition on the state being entered is the one that plays. */
+.rs.show {
+    opacity: 1;
+    blur: gaussian(0.0);
+    transform: translateY(0px);
+    transition-duration: 0.18s, 0.22s, 0.18s;
+}
+
+/* The row holds the padding, so the track below can run the card's full width at its bottom edge. */
+.rs-row {
+    width: 100%;
+    flow-children: right;
+    padding: 9px 14px 11px 12px;
+}
+
+.rs-icon {
+    width: 20px;
+    height: 20px;
+    margin-right: 11px;
+    vertical-align: center;
+    background-image: url("s2r://panorama/images/icons/ui/account_locked.vsvg");
+    background-size: 100% 100%;
+    /* The icons are 32x32 SVGs; rasterize at 2x the drawn size so 1440p and 4K stay sharp. */
+    background-texture-size: 40px 40px;
+    background-repeat: no-repeat;
+    wash-color: #e8543f;
+}
+
+.rs-main {
+    width: fill-parent-flow(1.0);
+    flow-children: down;
+    vertical-align: center;
+}
+.rs-eyebrow {
+    font-family: Stratum2 Mono;
+    font-size: 9px;
+    font-weight: bold;
+    letter-spacing: 1.6px;
+    color: #e8543f;
+    text-transform: uppercase;
+}
+.rs-title {
+    font-family: Stratum2 Medium Condensed;
+    font-size: 18px;
+    font-weight: bold;
+    letter-spacing: 0.2px;
+    line-height: 19.8px;
+    color: #ffffff;
+    margin-top: 1px;
+}
+.rs-sub {
+    font-family: Stratum2 Regular;
+    font-size: 11.5px;
+    color: #9aa2ac;
+    margin-top: 2px;
+}
+
+/* The countdown: a big number and a small "s" on its baseline. */
+.rs-num {
+    flow-children: right;
+    vertical-align: center;
+    margin-left: 11px;
+}
+.rs-n {
+    font-family: Stratum2 Medium Condensed;
+    font-size: 30px;
+    font-weight: bold;
+    line-height: 27px;
+    min-width: 32px;
+    text-align: right;
+    color: #e8543f;
+}
+/* "Stratum2 Medium Condensed" at normal weight is the preview's 600. */
+.rs-s {
+    font-family: Stratum2 Medium Condensed;
+    font-size: 13px;
+    color: #6c747d;
+    vertical-align: bottom;
+    margin-left: 1px;
+    margin-bottom: 1px;
+}
+
+/* Restarts by swapping between two names: removing and re-adding one in a tick sends nothing. */
+@keyframes 'rs-pop-a' { 0% { transform: scale3d(1.18, 1.18, 1.0); } 100% { transform: scale3d(1.0, 1.0, 1.0); } }
+@keyframes 'rs-pop-b' { 0% { transform: scale3d(1.18, 1.18, 1.0); } 100% { transform: scale3d(1.0, 1.0, 1.0); } }
+.rs-n.pop-a {
+    animation-name: rs-pop-a;
+    animation-duration: 0.45s;
+    animation-timing-function: ease-out;
+    animation-iteration-count: 1;
+}
+.rs-n.pop-b {
+    animation-name: rs-pop-b;
+    animation-duration: 0.45s;
+    animation-timing-function: ease-out;
+    animation-iteration-count: 1;
+}
+
+/* ------------------------------------------------------------------ the bar */
+
+.rs-track {
+    width: 100%;
+    height: 2px;
+    vertical-align: bottom;
+}
+/* Full by default, with no duration, so taking "run" and the dur-N class off snaps it back instead of animating. */
+.rs-bar {
+    width: 100%;
+    height: 100%;
+    background-color: #e8543f;
+    clip: rect( 0%, 100%, 100%, 0% );
+    transition-property: clip;
+    transition-duration: 0.0s;
+    transition-timing-function: linear;
+}
+
+/* Where it starts. */
+.rs-bar.at-0 { clip: rect( 0%, 0%, 100%, 0% ); }
+.rs-bar.at-1 { clip: rect( 0%, 5%, 100%, 0% ); }
+.rs-bar.at-2 { clip: rect( 0%, 10%, 100%, 0% ); }
+.rs-bar.at-3 { clip: rect( 0%, 15%, 100%, 0% ); }
+.rs-bar.at-4 { clip: rect( 0%, 20%, 100%, 0% ); }
+.rs-bar.at-5 { clip: rect( 0%, 25%, 100%, 0% ); }
+.rs-bar.at-6 { clip: rect( 0%, 30%, 100%, 0% ); }
+.rs-bar.at-7 { clip: rect( 0%, 35%, 100%, 0% ); }
+.rs-bar.at-8 { clip: rect( 0%, 40%, 100%, 0% ); }
+.rs-bar.at-9 { clip: rect( 0%, 45%, 100%, 0% ); }
+.rs-bar.at-10 { clip: rect( 0%, 50%, 100%, 0% ); }
+.rs-bar.at-11 { clip: rect( 0%, 55%, 100%, 0% ); }
+.rs-bar.at-12 { clip: rect( 0%, 60%, 100%, 0% ); }
+.rs-bar.at-13 { clip: rect( 0%, 65%, 100%, 0% ); }
+.rs-bar.at-14 { clip: rect( 0%, 70%, 100%, 0% ); }
+.rs-bar.at-15 { clip: rect( 0%, 75%, 100%, 0% ); }
+.rs-bar.at-16 { clip: rect( 0%, 80%, 100%, 0% ); }
+.rs-bar.at-17 { clip: rect( 0%, 85%, 100%, 0% ); }
+.rs-bar.at-18 { clip: rect( 0%, 90%, 100%, 0% ); }
+.rs-bar.at-19 { clip: rect( 0%, 95%, 100%, 0% ); }
+.rs-bar.at-20 { clip: rect( 0%, 100%, 100%, 0% ); }
+
+/* How long it drains for: every second to 60, then every 5 to 180. The plugin snaps to the nearest. */
+.rs-bar.dur-1 { transition-duration: 1.0s; }
+.rs-bar.dur-2 { transition-duration: 2.0s; }
+.rs-bar.dur-3 { transition-duration: 3.0s; }
+.rs-bar.dur-4 { transition-duration: 4.0s; }
+.rs-bar.dur-5 { transition-duration: 5.0s; }
+.rs-bar.dur-6 { transition-duration: 6.0s; }
+.rs-bar.dur-7 { transition-duration: 7.0s; }
+.rs-bar.dur-8 { transition-duration: 8.0s; }
+.rs-bar.dur-9 { transition-duration: 9.0s; }
+.rs-bar.dur-10 { transition-duration: 10.0s; }
+.rs-bar.dur-11 { transition-duration: 11.0s; }
+.rs-bar.dur-12 { transition-duration: 12.0s; }
+.rs-bar.dur-13 { transition-duration: 13.0s; }
+.rs-bar.dur-14 { transition-duration: 14.0s; }
+.rs-bar.dur-15 { transition-duration: 15.0s; }
+.rs-bar.dur-16 { transition-duration: 16.0s; }
+.rs-bar.dur-17 { transition-duration: 17.0s; }
+.rs-bar.dur-18 { transition-duration: 18.0s; }
+.rs-bar.dur-19 { transition-duration: 19.0s; }
+.rs-bar.dur-20 { transition-duration: 20.0s; }
+.rs-bar.dur-21 { transition-duration: 21.0s; }
+.rs-bar.dur-22 { transition-duration: 22.0s; }
+.rs-bar.dur-23 { transition-duration: 23.0s; }
+.rs-bar.dur-24 { transition-duration: 24.0s; }
+.rs-bar.dur-25 { transition-duration: 25.0s; }
+.rs-bar.dur-26 { transition-duration: 26.0s; }
+.rs-bar.dur-27 { transition-duration: 27.0s; }
+.rs-bar.dur-28 { transition-duration: 28.0s; }
+.rs-bar.dur-29 { transition-duration: 29.0s; }
+.rs-bar.dur-30 { transition-duration: 30.0s; }
+.rs-bar.dur-31 { transition-duration: 31.0s; }
+.rs-bar.dur-32 { transition-duration: 32.0s; }
+.rs-bar.dur-33 { transition-duration: 33.0s; }
+.rs-bar.dur-34 { transition-duration: 34.0s; }
+.rs-bar.dur-35 { transition-duration: 35.0s; }
+.rs-bar.dur-36 { transition-duration: 36.0s; }
+.rs-bar.dur-37 { transition-duration: 37.0s; }
+.rs-bar.dur-38 { transition-duration: 38.0s; }
+.rs-bar.dur-39 { transition-duration: 39.0s; }
+.rs-bar.dur-40 { transition-duration: 40.0s; }
+.rs-bar.dur-41 { transition-duration: 41.0s; }
+.rs-bar.dur-42 { transition-duration: 42.0s; }
+.rs-bar.dur-43 { transition-duration: 43.0s; }
+.rs-bar.dur-44 { transition-duration: 44.0s; }
+.rs-bar.dur-45 { transition-duration: 45.0s; }
+.rs-bar.dur-46 { transition-duration: 46.0s; }
+.rs-bar.dur-47 { transition-duration: 47.0s; }
+.rs-bar.dur-48 { transition-duration: 48.0s; }
+.rs-bar.dur-49 { transition-duration: 49.0s; }
+.rs-bar.dur-50 { transition-duration: 50.0s; }
+.rs-bar.dur-51 { transition-duration: 51.0s; }
+.rs-bar.dur-52 { transition-duration: 52.0s; }
+.rs-bar.dur-53 { transition-duration: 53.0s; }
+.rs-bar.dur-54 { transition-duration: 54.0s; }
+.rs-bar.dur-55 { transition-duration: 55.0s; }
+.rs-bar.dur-56 { transition-duration: 56.0s; }
+.rs-bar.dur-57 { transition-duration: 57.0s; }
+.rs-bar.dur-58 { transition-duration: 58.0s; }
+.rs-bar.dur-59 { transition-duration: 59.0s; }
+.rs-bar.dur-60 { transition-duration: 60.0s; }
+.rs-bar.dur-65 { transition-duration: 65.0s; }
+.rs-bar.dur-70 { transition-duration: 70.0s; }
+.rs-bar.dur-75 { transition-duration: 75.0s; }
+.rs-bar.dur-80 { transition-duration: 80.0s; }
+.rs-bar.dur-85 { transition-duration: 85.0s; }
+.rs-bar.dur-90 { transition-duration: 90.0s; }
+.rs-bar.dur-95 { transition-duration: 95.0s; }
+.rs-bar.dur-100 { transition-duration: 100.0s; }
+.rs-bar.dur-105 { transition-duration: 105.0s; }
+.rs-bar.dur-110 { transition-duration: 110.0s; }
+.rs-bar.dur-115 { transition-duration: 115.0s; }
+.rs-bar.dur-120 { transition-duration: 120.0s; }
+.rs-bar.dur-125 { transition-duration: 125.0s; }
+.rs-bar.dur-130 { transition-duration: 130.0s; }
+.rs-bar.dur-135 { transition-duration: 135.0s; }
+.rs-bar.dur-140 { transition-duration: 140.0s; }
+.rs-bar.dur-145 { transition-duration: 145.0s; }
+.rs-bar.dur-150 { transition-duration: 150.0s; }
+.rs-bar.dur-155 { transition-duration: 155.0s; }
+.rs-bar.dur-160 { transition-duration: 160.0s; }
+.rs-bar.dur-165 { transition-duration: 165.0s; }
+.rs-bar.dur-170 { transition-duration: 170.0s; }
+.rs-bar.dur-175 { transition-duration: 175.0s; }
+.rs-bar.dur-180 { transition-duration: 180.0s; }
+
+/* After the at-N ladder, so it wins over any of them: same specificity, later rule. */
+.rs-bar.run { clip: rect( 0%, 0%, 100%, 0% ); }

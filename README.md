@@ -67,3 +67,6 @@ Designed for <a href="https://github.com/roflmuffin/CounterStrikeSharp">CounterS
 ||`0` - None |
 ||`1` - All players|
 ||`2` - Only Admins with the `@css/generic` flag|
+| `Hud` | Optional, a config without it gets the defaults. Needs the `reservedslots_hud` layout in the workshop addon |
+||`Enabled` - `true`: the player about to be kicked sees a red card counting down the kick delay (no card when the delay is `0`), instead of the instructor hint. `false` brings the hint and the chat lines back |
+||`OthersToast` - `true`: the "Player X was kicked" line becomes a toast through ToastService, for whoever `Display Kicked Players Message` sends it to. Chat when ToastService is not installed |
