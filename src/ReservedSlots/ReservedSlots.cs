@@ -448,6 +448,19 @@ public partial class ReservedSlots : BasePlugin, IPluginConfig<ReservedSlotsConf
         if (player == null || !player.IsValid)
             return;
 
+        // The same count test ShouldStillKick runs before the kick, run before any card or countdown starts: a
+        // server-full kick can come long after the join decided "full" (a VIP on cooldown turned away at team
+        // select with Kick Check Method 1), and nobody should see a countdown for a slot that is free.
+        if (reason == KickReason.ServerIsFull)
+        {
+            var connectedHumanPlayers = GetConnectedHumanPlayers();
+            if (!IsOverPublicSlots(connectedHumanPlayers))
+            {
+                Logger.LogInformation("[Reserved Slots] {Name} ({SteamID}) - not past the public slots ({Humans} players), no server-full kick.", player.PlayerName, player.SteamID, connectedHumanPlayers.Count);
+                return;
+            }
+        }
+
         var name = player.PlayerName;
         var steamid = player.SteamID.ToString();
         var playerSteamId = player.SteamID;
